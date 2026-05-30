@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cost Manager Application</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Cost Manager</h1>
+        <p>Final Project in Front-End Development</p>
+    </header>
+
+    <div class="grid">
+        <div>
+            <div class="card">
+                <h2>Add New Cost Item</h2>
+                <form id="cost-form">
+                    <div class="form-group">
+                        <label for="cost-sum">Sum:</label>
+                        <input type="number" id="cost-sum" required step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="cost-currency">Currency:</label>
+                        <select id="cost-currency">
+                            <option value="USD">USD</option>
+                            <option value="ILS">ILS</option>
+                            <option value="GBP">GBP</option>
+                            <option value="EURO">EURO</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cost-category">Category:</label>
+                        <select id="cost-category">
+                            <option value="Food">Food</option>
+                            <option value="Car">Car</option>
+                            <option value="Education">Education</option>
+                            <option value="Entertainment">Entertainment</option>
+                            <option value="Utilities">Utilities</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cost-desc">Description:</label>
+                        <input type="text" id="cost-desc" required>
+                    </div>
+                    <button type="submit">Add Item</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Exchange Rate Settings</h2>
+                <div class="form-group">
+                    <label for="settings-url">Currency Server URL:</label>
+                    <input type="url" id="settings-url" placeholder="https://example.com/rates.json">
+                </div>
+                <button id="save-settings-btn">Save & Update Rates</button>
+            </div>
+        </div>
+
+        <div>
+            <div class="card">
+                <h2>Report Filters & Charts</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <div>
+                        <label for="filter-year">Year:</label>
+                        <input type="number" id="filter-year" value="2026">
+                    </div>
+                    <div>
+                        <label for="filter-month">Month (1-12):</label>
+                        <input type="number" id="filter-month" value="5" min="1" max="12">
+                    </div>
+                    <div>
+                        <label for="filter-currency">Display Currency:</label>
+                        <select id="filter-currency">
+                            <option value="USD">USD</option>
+                            <option value="ILS">ILS</option>
+                            <option value="GBP">GBP</option>
+                            <option value="EURO">EURO</option>
+                        </select>
+                    </div>
+                </div>
+                <button id="generate-report-btn">Generate Report & Charts</button>
+
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
+                <div class="charts-container">
+                    <div class="chart-box">
+                        <h3>Categories (Pie)</h3>
+                        <canvas id="pieChart"></canvas>
+                    </div>
+                    <div class="chart-box">
+                        <h3>Annual Trend (Bar)</h3>
+                        <canvas id="barChart"></canvas>
+                    </div>
+                </div>
+
+                <div id="report-output" style="margin-top: 20px; display: none;">
+                    <h3>Detailed Report</h3>
+                    <table id="report-table">
+                        <thead>
+                        <tr>
+                            <th>Day</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Original Cost</th>
+                        </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="total-highlight" id="report-total"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="db.js"></script>
+
+<script>
+    const DEFAULT_RATES_URL = "https://raw.githubusercontent.com/yourusername/yourrepo/main/rates.json";
+    let pieChartInstance = null;
+    let barChartInstance = null;
+
+
+    const myCostsDB = db.openCostsDB("costsdb", 1);
+
+    document.addEventListener("DOMContentLoaded", function() {
+
+        const savedUrl = localStorage.getItem("custom_rates_url");
+        if (savedUrl) {
+            document.getElementById("settings-url").value = savedUrl;
+        }
+
+        fetchAndStoreRates();
+
+
+        document.getElementById("cost-form").addEventListener("submit", function(e) {
+            e.preventDefault();
+
+            const costItem = {
+                sum: parseFloat(document.getElementById("cost-sum").value),
+                currency: document.getElementById("cost-currency").value,
+                category: document.getElementById("cost-category").value,
+                description: document.getElementById("cost-desc").value
+            };
+
+            myCostsDB.addCost(costItem);
+            alert("Cost item added successfully!");
+            this.reset();
+
+
+            renderDashboard();
+        });
+
+
+        document.getElementById("save-settings-btn").addEventListener("click", function() {
+            const urlInput = document.getElementById("settings-url").value.trim();
+            if (urlInput) {
+                localStorage.setItem("custom_rates_url", urlInput);
+            } else {
+                localStorage.removeItem("custom_rates_url");
+            }
+            fetchAndStoreRates();
+        });
+
+
+        document.getElementById("generate-report-btn").addEventListener("click", renderDashboard);
+
+
+        setTimeout(renderDashboard, 500);
+    });
+
+
+    function fetchAndStoreRates() {
+        const customUrl = localStorage.getItem("custom_rates_url");
+        const urlToFetch = customUrl || DEFAULT_RATES_URL;
+
+        fetch(urlToFetch)
+            .then(response => response.json())
+            .then(data => {
+
+                localStorage.setItem("currency_rates", JSON.stringify(data));
+                console.log("Rates updated successfully from server", data);
+            })
+            .catch(error => {
+                console.error("Error fetching exchange rates, using fallback rates:", error);
+
+            });
+    }
+
+
+    function renderDashboard() {
+        const year = parseInt(document.getElementById("filter-year").value);
+        const month = parseInt(document.getElementById("filter-month").value);
+        const currency = document.getElementById("filter-currency").value;
+
+
+        const report = db.getReport(currency, year, month);
+
+
+        const tbody = document.querySelector("#report-table tbody");
+        tbody.innerHTML = "";
+
+        if (report.costs.length > 0) {
+            document.getElementById("report-output").style.display = "block";
+            report.costs.forEach(item => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                <td>${item.date.day}</td>
+                <td>${item.category}</td>
+                <td>${item.description}</td>
+                <td>${item.sum} ${item.currency}</td>
+            `;
+                tbody.appendChild(row);
+            });
+        } else {
+            document.getElementById("report-output").style.display = "none";
+        }
+
+        document.getElementById("report-total").innerText = `Total: ${report.total.sum} ${report.total.currency}`;
+
+
+        const categoryTotals = {};
+        report.costs.forEach(item => {
+
+            const savedRates = JSON.parse(localStorage.getItem("currency_rates")) || { "USD": 1, "GBP": 0.6, "EURO": 0.7, "ILS": 3.4 };
+            const sumInUSD = item.sum / (savedRates[item.currency] || 1);
+            const convertedSum = sumInUSD * (savedRates[currency] || 1);
+
+            categoryTotals[item.category] = (categoryTotals[item.category] || 0) + convertedSum;
+        });
+
+        renderPieChart(categoryTotals);
+
+
+        const monthlyTotals = Array(12).fill(0);
+        for (let m = 1; m <= 12; m++) {
+            const monthlyReport = db.getReport(currency, year, m);
+            monthlyTotals[m - 1] = monthlyReport.total.sum;
+        }
+
+        renderBarChart(monthlyTotals, currency);
+    }
+
+
+    function renderPieChart(categoryData) {
+        const ctx = document.getElementById('pieChart').getContext('2d');
+        const labels = Object.keys(categoryData);
+        const data = Object.values(categoryData);
+
+        if (pieChartInstance) { pieChartInstance.destroy(); }
+
+        pieChartInstance = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: ['#ff6384', '#36a2eb', '#cc65fe', '#ffce56', '#4bc0c0']
+                }]
+            },
+            options: { responsive: true }
+        });
+    }
+
+
+    function renderBarChart(monthlyData, currency) {
+        const ctx = document.getElementById('barChart').getContext('2d');
+        const monthsLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        if (barChartInstance) { barChartInstance.destroy(); }
+
+        barChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: monthsLabels,
+                datasets: [{
+                    label: `Total Costs (${currency})`,
+                    data: monthlyData,
+                    backgroundColor: '#2a5298',
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    }
+</script>
+</body>
+</html>
